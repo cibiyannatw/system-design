@@ -17,8 +17,13 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.DEV_RENDER_SERVICE_ID }}
         run: |
-          existing=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+          set -euo pipefail
+
+          # GET returns [{"envVar": {"key": "...", "value": "..."}, "cursor": "..."}, ...]
+          # NOT a flat {"key":..., "value":...} array - must unwrap .envVar.
+          existing=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
             "https://api.render.com/v1/services/$SERVICE_ID/env-vars")
+          echo "Existing env vars response: $existing"
 
           new_vars='[
             {"key": "ENVIRONMENT", "value": "dev"},
@@ -38,23 +43,41 @@ jobs:
           # set manually in the Render dashboard - only overwrite/add the
           # non-sensitive keys listed above.
           merged=$(echo "$existing" | jq --argjson new "$new_vars" '
-            [.[] | {key, value}] as $old |
+            [.[] | {key: .envVar.key, value: .envVar.value}] as $old |
             ($new | map(.key)) as $newKeys |
             ($old | map(select(.key as $k | ($newKeys | index($k)) == null))) + $new
           ')
+          echo "Payload being sent: $merged"
 
-          curl -X PUT "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
+          response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$merged"
+            -d "$merged")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "::error::Render API rejected env var update (HTTP $http_code)"
+            exit 1
+          fi
 
       - name: Trigger Dev deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.DEV_RENDER_SERVICE_ID }}
         run: |
-          curl -X POST "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
-            -H "Authorization: Bearer $RENDER_API_KEY"
+          set -euo pipefail
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "::error::Render API rejected deploy trigger (HTTP $http_code)"
+            exit 1
+          fi
 
   deploy-prod:
     needs: deploy-dev
@@ -66,8 +89,13 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.PROD_RENDER_SERVICE_ID }}
         run: |
-          existing=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+          set -euo pipefail
+
+          # GET returns [{"envVar": {"key": "...", "value": "..."}, "cursor": "..."}, ...]
+          # NOT a flat {"key":..., "value":...} array - must unwrap .envVar.
+          existing=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
             "https://api.render.com/v1/services/$SERVICE_ID/env-vars")
+          echo "Existing env vars response: $existing"
 
           new_vars='[
             {"key": "ENVIRONMENT", "value": "prod"},
@@ -84,20 +112,38 @@ jobs:
           ]'
 
           merged=$(echo "$existing" | jq --argjson new "$new_vars" '
-            [.[] | {key, value}] as $old |
+            [.[] | {key: .envVar.key, value: .envVar.value}] as $old |
             ($new | map(.key)) as $newKeys |
             ($old | map(select(.key as $k | ($newKeys | index($k)) == null))) + $new
           ')
+          echo "Payload being sent: $merged"
 
-          curl -X PUT "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
+          response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$merged"
+            -d "$merged")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "::error::Render API rejected env var update (HTTP $http_code)"
+            exit 1
+          fi
 
       - name: Trigger Prod deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.PROD_RENDER_SERVICE_ID }}
         run: |
-          curl -X POST "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
-            -H "Authorization: Bearer $RENDER_API_KEY"
+          set -euo pipefail
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "::error::Render API rejected deploy trigger (HTTP $http_code)"
+            exit 1
+          fi
