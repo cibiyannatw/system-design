@@ -1,0 +1,103 @@
+name: Deploy to Render
+
+# Trunk-based: everything happens off main. Dev deploys automatically,
+# Prod requires manual approval (configured via the "production"
+# GitHub Environment in repo Settings -> Environments).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync non-sensitive env vars (Dev)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.DEV_RENDER_SERVICE_ID }}
+        run: |
+          existing=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$SERVICE_ID/env-vars")
+
+          new_vars='[
+            {"key": "ENVIRONMENT", "value": "dev"},
+            {"key": "DEBUG", "value": "True"},
+            {"key": "APP_NAME", "value": "My Flask App (DEV)"},
+            {"key": "DATABASE_HOST", "value": "dev-db.internal"},
+            {"key": "API_BASE_URL", "value": "https://dev-api.example.com"},
+            {"key": "TOTAL_USERS", "value": "57"},
+            {"key": "ACTIVE_SESSIONS", "value": "12"},
+            {"key": "FEATURE_ANALYTICS", "value": "False"},
+            {"key": "FEATURE_EMAIL_NOTIFICATIONS", "value": "False"},
+            {"key": "FEATURE_ADVANCED_SEARCH", "value": "False"},
+            {"key": "FEATURE_DEBUG_MODE", "value": "True"}
+          ]'
+
+          # Keep secrets (SECRET_KEY, DATABASE_PASSWORD, API_KEY) that were
+          # set manually in the Render dashboard - only overwrite/add the
+          # non-sensitive keys listed above.
+          merged=$(echo "$existing" | jq --argjson new "$new_vars" '
+            [.[] | {key, value}] as $old |
+            ($new | map(.key)) as $newKeys |
+            ($old | map(select(.key as $k | ($newKeys | index($k)) == null))) + $new
+          ')
+
+          curl -X PUT "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$merged"
+
+      - name: Trigger Dev deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.DEV_RENDER_SERVICE_ID }}
+        run: |
+          curl -X POST "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY"
+
+  deploy-prod:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Sync non-sensitive env vars (Prod)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.PROD_RENDER_SERVICE_ID }}
+        run: |
+          existing=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$SERVICE_ID/env-vars")
+
+          new_vars='[
+            {"key": "ENVIRONMENT", "value": "prod"},
+            {"key": "DEBUG", "value": "False"},
+            {"key": "APP_NAME", "value": "My Flask App (PROD)"},
+            {"key": "DATABASE_HOST", "value": "prod-db.internal"},
+            {"key": "API_BASE_URL", "value": "https://api.example.com"},
+            {"key": "TOTAL_USERS", "value": "2547"},
+            {"key": "ACTIVE_SESSIONS", "value": "342"},
+            {"key": "FEATURE_ANALYTICS", "value": "True"},
+            {"key": "FEATURE_EMAIL_NOTIFICATIONS", "value": "True"},
+            {"key": "FEATURE_ADVANCED_SEARCH", "value": "True"},
+            {"key": "FEATURE_DEBUG_MODE", "value": "False"}
+          ]'
+
+          merged=$(echo "$existing" | jq --argjson new "$new_vars" '
+            [.[] | {key, value}] as $old |
+            ($new | map(.key)) as $newKeys |
+            ($old | map(select(.key as $k | ($newKeys | index($k)) == null))) + $new
+          ')
+
+          curl -X PUT "https://api.render.com/v1/services/$SERVICE_ID/env-vars" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$merged"
+
+      - name: Trigger Prod deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.PROD_RENDER_SERVICE_ID }}
+        run: |
+          curl -X POST "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY"

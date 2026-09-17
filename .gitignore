@@ -1,9 +1,14 @@
 # Env & secrets
 .env
+.env.local
+.env.*.local
 .venv
 venv/
 env/
 ENV/
+
+# Env templates (committed - no real values, just documentation of keys)
+!.env.local.example
 
 # Python
 __pycache__/
